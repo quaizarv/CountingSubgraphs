@@ -115,16 +115,28 @@ class Estimator:
     for hEdge in self.H.Edges():
       a, b = hEdge.GetId()
       self.Z[(a, b)] = 0
-    
+
+  """    
+  def edgeOrientations(e):
+    u, v = e
+    return [(u,v), (v, u)]
+
+  def edgeSetOrientations(T):
+    return [(o1, o2, o3)
+            for o1 in edgeOrientations(T[0])
+            for o2 in edgeOrientations(T[0])
+            for o3 in edgeOrientations(T[0])]
+
   def debug(self, G):
     edges = [e.GetId() for e in G.Edges()]
     m = len(edges)
     for i in range(m):
       for j in range(m):
         for k in range(m):
-          e1 = edges[i]
-          e2 = edges[j]
-          e3 = edges[k]
+          T = [edges[ix] for ix in [i,j,k]]
+          for o1, o2, o3 in edgeSetOrientations(T):
+            
+  """
           
           
 
