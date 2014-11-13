@@ -4,7 +4,6 @@ import snap
 from collections import *
 import random
 import numpy as np
-import mmh3
 from genPrime import *
 
 def permutations(l):
@@ -51,11 +50,20 @@ def test_unityRoots():
   assert(abs(unityRoots(3)[0].real + 0.5) < EPSILON)
   assert(abs(unityRoots(3)[0].imag - sqrt(3)/2) < EPSILON)
          
-def kWiseHash(n, seed):
-  return mmh3.hash(struct.pack('I', n), seed[0])
+def randomNDegreePoly(n, p):
+  """Returns a degree n polynomial with random coefficients chosen
+  from range [1, p-1]
+  """
+  return [random.randint(1, p-1) for _ in range(n+1)]
 
 def kWiseHashSeed(k, p):
-  return [random.randint(1, p) for _ in range(k)]
+  return randomNDegreePoly(k-1, p)
+  #return [random.randint(1, p-1) for _ in range(k)]
+
+def kWiseHash(x, seed, p, m):
+  return (np.polyval(seed, x) % p) % m
+  #return mmh3.hash(struct.pack('I', n), seed[0])
+
 
 def createXc(c, H, p):
   ## precompute a few things so that we don't have to compute them often
@@ -63,7 +71,7 @@ def createXc(c, H, p):
   roots = unityRoots(c.GetOutDeg())
   outDeg = c.GetOutDeg()
   def Xc(u):
-    return roots[kWiseHash(u, seed) % outDeg]
+    return roots[kWiseHash(u, seed, p, outDeg)]
   return Xc  ## return the closure
 
 def computeXcTable(H, N):
@@ -76,19 +84,34 @@ def computeXcTable(H, N):
     XcTable[cId] = createXc(c, H, p)
   return XcTable    
 
+Yseed = []
 def createY(H, N):
   ## precompute a few things so that we don't have to compute them often
   p = firstPrimeAfter(N)
-  seed = kWiseHashSeed(4 * H.GetEdges(), p)
+  if len(Yseed) is 0:
+    Yseed.append(kWiseHashSeed(4 * H.GetEdges(), p))
+  #seed = kWiseHashSeed(4 * H.GetEdges(), p)
   t = H.GetNodes()
   def Y(u):
-    return 2 ** (kWiseHash(u, seed) % t)
+    #return 2 ** (kWiseHash(u, seed, p, t))
+    return 2 ** (kWiseHash(u, Yseed[0], p, t))
   return Y ## return the closure
 
 class Estimator:
   # H is the template Graph (aka subgraph) frequency of which is being
   # counted in the input graph G and N is size of G
-  def __init__(self, H, N):
+  def __init__(self, G, H, N):
+    def createMTable():
+      assert(self.G and self.H and self.XcTable and self.Q and self.Y and
+             self.degHNode)
+      MTable = {}
+      for u in range(self.G.GetNodes()):
+        for c in range(self.H.GetNodes()):
+          Xc = self.XcTable[c]
+          MTable[(u,c)] = Xc(u) * (self.Q ** (1.0 * self.Y(u)/self.degHNode[c]))
+      return MTable
+
+    self.G = G
     self.H = H
     tau = 2**H.GetNodes() - 1
     self.Q = unityRoots(tau)[random.randint(0, tau-1)]
@@ -96,20 +119,24 @@ class Estimator:
     self.Y = createY(H, N)
     self.Z = defaultdict(lambda: 0)
     self.degHNode = {n.GetId():n.GetOutDeg() for n in H.Nodes()}
+    self.MTable = createMTable()
+    self.HEdges = [e.GetId() for e in self.H.Edges()]
 
   # 'edge' is the input edge from G
   def updateZ(self, gEdge):
     def matchProb((a, b), (u, v)):
+      return self.MTable[(u, a)] * self.MTable[(v, b)]
       Xa = self.XcTable[a]
       Xb = self.XcTable[b]
       return (Xa(u) * Xb(v) * 
-              (self.Q ** (self.Y(u)/self.degHNode[a])) *
-              (self.Q ** (self.Y(v)/self.degHNode[b])))
+              (self.Q ** (1.0 * self.Y(u)/self.degHNode[a])) *
+              (self.Q ** (1.0 * self.Y(v)/self.degHNode[b])))
       
     u, v = gEdge.GetId()
-    for hEdge in self.H.Edges():
-      a, b = hEdge.GetId()
-      self.Z[(a, b)] += matchProb((a,b), (u,v)) + matchProb((a, b), (v, u))
+    for a, b in self.HEdges:
+      self.Z[(a, b)] += self.MTable[(u, a)] * self.MTable[(v, b)] + \
+          self.MTable[(u, b)] * self.MTable[(v, a)]
+      #matchProb((a,b), (u,v)) + matchProb((a, b), (v, u))
 
   def clearZ(self):
     for hEdge in self.H.Edges():
@@ -160,16 +187,18 @@ def countTrianglesBruteForce(G):
 def countSubgraphs(G):
   total = 0.0
   results = []
-  estCount = 1
+  estCount = 3200
+  H = snap.GenFull(snap.PUNGraph, 3)
   for i in range(estCount):
-    H = snap.GenRndGnm(snap.PUNGraph, 3, 3)
-    est = Estimator(H, G.GetNodes())
-    i = 0
+    est = Estimator(G, H, G.GetNodes())
     for e in G.Edges():
-      i = i + 1
-      if i % 10000 == 0: print i
       est.updateZ(e)
     results.append(est.subgraphCount())
+    #print i, results[-1]
   return sum(results)/estCount
 
+#G = snap.GenRndGnm(snap.PUNGraph, 500, 125 * 499)
+#G = snap.GenRndGnm(snap.PUNGraph, 100, 25 * 99)
+#r = countSubgraphs(G)
+#print r
 
